@@ -38,41 +38,19 @@ unsigned int cntYeelink   = 0;
 unsigned char getNodeDta  = 0;
 unsigned int  dtaNode     = 0;
 
+/*********************************************************************************************************
+** Function name:           ledShine
+** Descriptions:            ledShine
+*********************************************************************************************************/
 void ledShine(int time)
 {
     BcnDrive.setLedShine(1, time);
 }
-void yeelinkTest(char inDta)
-{
-    switch(inDta)
-    {
-        case 'a':
-        mySerial.print("ss1 45,2,1gg");                 //ADD Device. Format:  Datatype  Device ID, SensorID, Actuator ID
-        mySerial.println();             
-        cout << "add device" << endl;
-        break;
-        
-        case 'd':
-        mySerial.print("ss2 45gg");                     //DELETE Device. Format:  Datatype  Device ID
-        mySerial.println();
-        
-        cout << "del device" << endl;
-        break;
-        
-        case 'p':
-        mySerial.print("ss3 45,30.00gg");               //--POST DATA. Format:  Datatype  Device ID, Value
-        mySerial.println();
-        
-        cout << "post data" << endl;
-        break;
-        
-        default:
-        
-        cout << "err data" << endl;
 
-    }
-}
-
+/*********************************************************************************************************
+** Function name:           yeelinkAdd
+** Descriptions:            add a Node
+*********************************************************************************************************/
 void yeelinkAdd(unsigned char idNode, unsigned char idSensor, unsigned char idActuator)
 {
     char tmp[20];
@@ -82,6 +60,10 @@ void yeelinkAdd(unsigned char idNode, unsigned char idSensor, unsigned char idAc
     mySerial.println(tmp);
 }
 
+/*********************************************************************************************************
+** Function name:           yeelinkDel
+** Descriptions:            delete a Node 
+*********************************************************************************************************/
 void yeelinkDel(unsigned char idNode)
 {
     char tmp[20];
@@ -89,6 +71,10 @@ void yeelinkDel(unsigned char idNode)
     mySerial.println(tmp);
 }
 
+/*********************************************************************************************************
+** Function name:           yeelinkPost
+** Descriptions:            post Data
+*********************************************************************************************************/
 void yeelinkPost(unsigned char idNode, unsigned int psDta)
 {
     char tmp[20];
@@ -96,9 +82,10 @@ void yeelinkPost(unsigned char idNode, unsigned int psDta)
     cout << tmp << endl;
     mySerial.println(tmp);
 }
+
 /*********************************************************************************************************
-** Function name:           checkGoodDta
-** Descriptions:            if uart get good data
+** Function name:           timerIsr
+** Descriptions:            timer one isr
 *********************************************************************************************************/
 void timerIsr()
 {
@@ -211,25 +198,6 @@ void rfDtaProc()
         }
         __GdtaUartLen      = 0;
         __GstringComplete  = 0;
-    }
-}
-
-
-void yeelinkTest2()
-{
-
-    yeelinkAdd(2, 13, 0);
-    delay(100);
-    yeelinkAdd(2, 13, 0);
-    delay(1000);
-    while(1)
-    {
-        for(int i=0; i<1023; i++)
-        {
-            yeelinkPost(2, i);
-            delay(1000*12);         // delay 12s
-            ledShine(200);
-        }
     }
 }
 
