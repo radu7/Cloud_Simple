@@ -1,41 +1,119 @@
-/*
-  BeaconDemoCodeV0.2.ino
-  2013 Copyright (c) Seeed Technology Inc.  All right reserved.
-  
-  Author:Loovee
-  2012-12-3
-  
-  This library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
-  
-  This library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public
-  License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-*/
-#include <Arduino.h>
+// cloud simple
 #include <TimerOne.h>
+#include <Streaming.h>
+#include <BeaconDrive.h>
+#include <SoftwareSerial.h>
 
-#include "CloudApp.h"
-#include "CloudGlobalDfs.h"
+// data frame
+#define FRAMESTART1                 0x53                // data frame start1
+#define FRAMESTART2                 0x01                // data frame start2
+#define FRAMEEND1                   0x2f                // data frame end1
+#define FRAMEEND2                   0x45                // data frame end2
 
-unsigned char __GdtaUart[50];                                       // uart data buff
-unsigned char __GdtaUartLen        = 0;                             // uart data len
-unsigned char __GstringComplete    = 0;                             // if get data
+//bit of frame
+#define FRAMEBITSTART1              0                   // frame data bit0
+#define FRAMEBITSTART2              1
+#define FRAMEBITSRCID               2
+#define FRAMEBITSENSORID            3
+#define FRAMEBITDESTID              4
+#define FRAMEBITFRAME               5
+#define FRAMEBITDATALEN             6
+#define FRAMEBITDATA                7
 
-/*********************************************************************************************************
-** Function name:           timer1ISR
-** Descriptions:            timer interrupt service 
-*********************************************************************************************************/
-void timer1ISR()
+// frame type
+#define FRAMETYPEBC                 1                   // broadcast
+#define FRAMETYPECTRL               2                   // control
+#define FRAMETYPESET                3                   // setting
+
+#define __Debug                     0                   // debug mode
+
+SoftwareSerial mySerial(6, 7);                          // RX, TX
+
+unsigned char __GdtaUart[50];                           // uart data buff
+unsigned char __GdtaUartLen        = 0;                 // uart data len
+unsigned char __GstringComplete    = 0;                 // if get data
+
+unsigned char yeelinkFree = 1;
+unsigned int cntYeelink   = 0;
+unsigned char getNodeDta  = 0;
+unsigned int  dtaNode     = 0;
+
+void ledShine(int time)
 {
-    APP.appTimerIsr();                                              // application isr
+    BcnDrive.setLedShine(1, time);
+}
+void yeelinkTest(char inDta)
+{
+    switch(inDta)
+    {
+        case 'a':
+        mySerial.print("ss1 45,2,1gg");                 //ADD Device. Format:  Datatype  Device ID, SensorID, Actuator ID
+        mySerial.println();             
+        cout << "add device" << endl;
+        break;
+        
+        case 'd':
+        mySerial.print("ss2 45gg");                     //DELETE Device. Format:  Datatype  Device ID
+        mySerial.println();
+        
+        cout << "del device" << endl;
+        break;
+        
+        case 'p':
+        mySerial.print("ss3 45,30.00gg");               //--POST DATA. Format:  Datatype  Device ID, Value
+        mySerial.println();
+        
+        cout << "post data" << endl;
+        break;
+        
+        default:
+        
+        cout << "err data" << endl;
+
+    }
+}
+
+void yeelinkAdd(unsigned char idNode, unsigned char idSensor, unsigned char idActuator)
+{
+    char tmp[20];
+    sprintf(tmp, "ss1 %d,%d,%dgg", idNode, idSensor, idActuator);
+    
+    cout << tmp << endl;
+    mySerial.println(tmp);
+}
+
+void yeelinkDel(unsigned char idNode)
+{
+    char tmp[20];
+    sprintf(tmp, "ss2 %dgg", idNode);
+    mySerial.println(tmp);
+}
+
+void yeelinkPost(unsigned char idNode, unsigned int psDta)
+{
+    char tmp[20];
+    sprintf(tmp, "ss3 %d,%d.00gg", idNode, psDta);
+    cout << tmp << endl;
+    mySerial.println(tmp);
+}
+/*********************************************************************************************************
+** Function name:           checkGoodDta
+** Descriptions:            if uart get good data
+*********************************************************************************************************/
+void timerIsr()
+{
+    BcnDrive.ledIsr();
+
+    if(!yeelinkFree)
+    {
+        cntYeelink++;
+        if(cntYeelink > 12000)
+        {
+            cntYeelink  = 0;
+            yeelinkFree = 1;
+
+        }
+    }
 }
 
 /*********************************************************************************************************
@@ -76,30 +154,82 @@ unsigned char checkGoodDta(unsigned char *dta)
 }
 
 /*********************************************************************************************************
+** Function name:           checkGoodDta
+** Descriptions:            if uart get good data
+*********************************************************************************************************/
+void sendDtaYeelink(unsigned char *dta)
+{
+
+    //if(!yeelinkFree) return ;                       // yeelink not free
+
+    if(!yeelinkFree)
+    {
+#if __Debug
+        cout << "yeelink busy" << endl;
+        cout << "cntYeelink = " << cntYeelink << endl;
+#endif
+        return ;
+    }
+
+#if __Debug
+    cout << "yeelink free..." << endl;
+#endif
+
+    yeelinkFree = 0;
+    unsigned int sensorDta   = 0;
+
+    for(int i = 0; i<dta[FRAMEBITDATALEN]; i++)
+    {
+        sensorDta    = sensorDta << 8;
+        sensorDta   += dta[FRAMEBITDATA + i];
+    }
+
+    BcnDrive.setLedShine(1, 500);
+    
+    yeelinkPost(2, sensorDta);                        // post data to yeelink
+
+}
+
+/*********************************************************************************************************
 ** Function name:           rfDtaProc
 ** Descriptions:            get data from rfBee and process
 *********************************************************************************************************/
 void rfDtaProc()
 {
 
-    if(__GstringComplete == 1 && checkGoodDta(__GdtaUart))          // if serial get data
+    if(__GstringComplete == 1 && checkGoodDta(__GdtaUart))                      // if serial get data
     {
-        if(__GdtaUart[FRAMEBITFRAME] == 4)                          // other device join
+        if(__GdtaUart[FRAMEBITFRAME] == 4)                                      // other device join
         {
             // add code here
-            
         }
-        else if(__GdtaUart[FRAMEBITFRAME] == 1)
+        else if(__GdtaUart[FRAMEBITFRAME] == 1)                                 // broad cast
         {
-            
-        }
-        else if(APP.isTrigger(__GdtaUart))
-        {
-            APP.sendDtaYeelink(__GdtaUart);
+            // add code here
+            BcnDrive.setLedShine(1, 20);
+            sendDtaYeelink(__GdtaUart);
         }
         __GdtaUartLen      = 0;
         __GstringComplete  = 0;
+    }
+}
 
+
+void yeelinkTest2()
+{
+
+    yeelinkAdd(2, 13, 0);
+    delay(100);
+    yeelinkAdd(2, 13, 0);
+    delay(1000);
+    while(1)
+    {
+        for(int i=0; i<1023; i++)
+        {
+            yeelinkPost(2, i);
+            delay(1000*12);         // delay 12s
+            ledShine(200);
+        }
     }
 }
 
@@ -107,16 +237,25 @@ void rfDtaProc()
 ** Function name:           setup
 ** Descriptions:            setup
 *********************************************************************************************************/
-void setup()
-{
+void setup() {
 
-    Serial.begin(57600);                                            // Serial, to send/rev data from RFBee
-    Serial.println("Serial init over");
-    APP.init();                                                     // init application
+    Serial.begin(57600);
+    mySerial.begin(9600);
+    pinMode(13, OUTPUT);
     
-    Timer1.initialize(1000);                                        // set a timer of length 1ms
-    Timer1.attachInterrupt(timer1ISR);                              // attach the service routine here
+    yeelinkAdd(2, 13, 0);
+    delay(100);
+    yeelinkAdd(2, 13, 0);
+    delay(1000);
 
+    Timer1.initialize(1000);
+    Timer1.attachInterrupt( timerIsr );
+    
+    // yeelinkTest2();
+
+#if __Debug
+    cout << "hello world" << endl;
+#endif
 }
 
 /*********************************************************************************************************
@@ -125,22 +264,31 @@ void setup()
 *********************************************************************************************************/
 void loop()
 {
-    rfDtaProc();                                                    // data process
-    mySerialEvent();                                                // check serial data
+    rfDtaProc();
+    mySerialEvent();
 }
 
 /*********************************************************************************************************
 ** Function name:           serialEvent1
 ** Descriptions:            Serial event
 *********************************************************************************************************/
-void mySerialEvent() 
+void mySerialEvent()
 {
-    while (Serial.available())
+
+#if 1
+    while(Serial.available())
     {
         __GdtaUart[__GdtaUartLen++] = (unsigned char)Serial.read();
         __GstringComplete =   (__GdtaUart[__GdtaUartLen-1] == FRAMEEND2) ? 1 : __GstringComplete;
         __GdtaUartLen = (__GdtaUartLen > 45) ? 0 :  __GdtaUartLen;
     }
+#else
+    while(Serial.available())
+    {
+        char a = Serial.read();
+        yeelinkTest(a);
+    }
+#endif
 }
 
 /*********************************************************************************************************
